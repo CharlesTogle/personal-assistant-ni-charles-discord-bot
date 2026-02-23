@@ -47,8 +47,8 @@ Examples:
 
 Do not explain. Do not write code. Do not write examples outside of JSON."""
 
-N_PREDICT  = 80
-STOP_WORDS = ["### User:", "\n###", "Here's", "Sure,", "possible", "implementation", "Example"]
+N_PREDICT = 80
+STOP_WORDS = ["### User:", "\n###"]
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -87,7 +87,20 @@ async def query_llm(prompt: str) -> str:
         )
         text = (text or "").strip()
 
-        print(f"DEBUG LLM | url={LLAMA_URL} | len={len(text)} | preview={text[:120]!r}")
+        if not text:
+            try:
+                payload_preview = json.dumps(payload, ensure_ascii=True)[:500]
+            except Exception:
+                payload_preview = str(payload)[:500]
+            print(
+                "DEBUG LLM EMPTY"
+                f" | url={LLAMA_URL}"
+                f" | status={response.status_code}"
+                f" | keys={list(payload.keys()) if isinstance(payload, dict) else type(payload).__name__}"
+                f" | payload={payload_preview!r}"
+            )
+        else:
+            print(f"DEBUG LLM | url={LLAMA_URL} | len={len(text)} | preview={text[:120]!r}")
         return text
 
 
