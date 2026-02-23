@@ -57,7 +57,27 @@ Never use markdown or backticks."""
             "stop": ["### User:", "\n###", "\n\n"],
         })
         response.raise_for_status()
-        return response.json().get("content", "").strip()
+        payload = response.json()
+        # llama.cpp /completion -> {"content": "..."}
+        # local proxy (8081)      -> {"response": "..."}
+        text = payload.get("content")
+        if text is None:
+            text = payload.get("response")
+        if text is None and isinstance(payload.get("choices"), list) and payload["choices"]:
+            text = payload["choices"][0].get("text", "")
+
+        result = (text or "").strip()
+        print(
+            "DEBUG query_llm",
+            {
+                "url": LLAMA_URL,
+                "status": response.status_code,
+                "keys": list(payload.keys()) if isinstance(payload, dict) else type(payload).__name__,
+                "result_len": len(result),
+                "preview": result[:120],
+            },
+        )
+        return result
 
 
 # ── Android command forwarder ────────────────────────────────────────────────
