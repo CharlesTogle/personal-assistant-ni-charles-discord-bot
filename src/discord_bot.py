@@ -37,7 +37,20 @@ async def on_message(message: discord.Message):
     if message.author == client.user:
         return
 
+    # In guild channels, only respond when the bot is mentioned.
+    # In DMs, keep responding without mention.
+    if message.guild is not None and client.user not in message.mentions:
+        return
+
     if str(message.author.id) not in AUTHORIZED_DISCORD_IDS:
+        return
+
+    content = message.content
+    if message.guild is not None and client.user is not None:
+        # Remove direct mention token before forwarding to backend.
+        content = content.replace(client.user.mention, "").strip()
+
+    if not content:
         return
 
     processing = await message.reply("Processing...")
@@ -48,7 +61,7 @@ async def on_message(message: discord.Message):
                 f"{SERVER_URL}/task",
                 json={
                     "discord_id": str(message.author.id),
-                    "message": message.content,
+                    "message": content,
                 },
             )
             response.raise_for_status()
