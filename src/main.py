@@ -26,6 +26,7 @@ ANDROID_AUTH      = (
     os.environ.get("ANDROID_AUTH_USER", "assistant"),
     os.environ.get("ANDROID_AUTH_PASS", "changeme"),
 )
+SEPHER_API_KEY    = os.environ.get("SEPHER_API_KEY", "").strip()
 
 # ── Intent patterns ──────────────────────────────────────────────────────────
 # Ordered by specificity — more specific patterns first
@@ -292,7 +293,9 @@ async def send_to_android(command: dict) -> dict:
                 response = await client.post(
                     url,
                     json=payload,
-                    auth=ANDROID_AUTH,
+                    headers={
+                        "Authorization": f"Bearer {SEPHER_API_KEY}",
+                    },
                 )
                 response.raise_for_status()
                 data = response.json()

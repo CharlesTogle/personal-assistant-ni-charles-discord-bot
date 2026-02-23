@@ -24,6 +24,7 @@ LLAMA_URL=http://localhost:8080/completion
 
 ANDROID_URL=https://your-name.ngrok-free.app
 ANDROID_LOCAL_URL=http://192.168.1.50:8081
+SEPHER_API_KEY=your_shared_secret_token
 ANDROID_AUTH_USER=assistant
 ANDROID_AUTH_PASS=use_a_strong_password
 ```
