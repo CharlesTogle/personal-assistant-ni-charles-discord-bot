@@ -34,12 +34,27 @@ def verify_discord_id(discord_id: str):
 # ── LLM ─────────────────────────────────────────────────────────────────────
 async def query_llm(prompt: str) -> str:
     """Send a prompt to TinyLlama and return the raw text response."""
+    SYSTEM_PROMPT = """You are a phone assistant. Reply with ONE of:
+- Plain text: when greeted or asked capabilities (list: set_alarm, send_sms, play_spotify, send_email, get_notifications)
+- Raw JSON only: {"action":"<name>","params":{}} when user picks an action
+Never use markdown or backticks."""
+
+    formatted = (
+        f"### System:\n{SYSTEM_PROMPT}\n\n"
+        f"### User:\n{prompt}\n\n"
+        f"### Assistant:\n"
+    )
+
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(LLAMA_URL, json={
-            "prompt": prompt,
-            "n_predict": 128,
+            "prompt": formatted,
+            "n_predict": 64,
             "temperature": 0.1,
-            "stop": ["\n\n"],
+            "top_k": 10,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1,
+            "cache_prompt": True,
+            "stop": ["### User:", "\n###", "\n\n"],
         })
         response.raise_for_status()
         return response.json().get("content", "").strip()

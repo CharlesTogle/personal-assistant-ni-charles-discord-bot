@@ -82,7 +82,9 @@ async def on_message(message: discord.Message):
         action = data.get("action")
 
         if action == "chat":
-            await safe_edit(processing, data.get("reply") or "No response")
+            reply = data.get("reply", "")
+            print(f"DEBUG reply: '{reply}'")  # add this temporarily
+            await safe_edit(processing, reply or "No response")
             return
 
         params = data.get("params", {})
