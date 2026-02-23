@@ -215,27 +215,14 @@ async def query_llm_chat(message: str) -> str:
 
 # ── Android forwarder ─────────────────────────────────────────────────────────
 async def send_to_android(command: dict) -> dict:
-    """Try local IP first (2s timeout), fall back to ngrok."""
-    try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.post(
-                f"{ANDROID_LOCAL_URL}/command",
-                json=command,
-                auth=ANDROID_AUTH,
-            )
-            print(f"DEBUG android | via=local | status={r.status_code}")
-            return r.json()
-    except Exception as e:
-        print(f"DEBUG android | local failed ({e}), trying ngrok...")
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(
-            f"{ANDROID_URL}/command",
-            json=command,
-            auth=ANDROID_AUTH,
-        )
-        print(f"DEBUG android | via=ngrok | status={r.status_code}")
-        return r.json()
+    """Simulated execution mode for action testing."""
+    return {
+        "status": "simulated_success",
+        "simulated": True,
+        "action": command.get("action"),
+        "params": command.get("params", {}),
+        "message": "Simulated action completed successfully.",
+    }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
