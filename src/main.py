@@ -30,6 +30,14 @@ ANDROID_AUTH      = (
 # ── Intent patterns ──────────────────────────────────────────────────────────
 # Ordered by specificity — more specific patterns first
 INTENT_PATTERNS = [
+    # read_email_summary
+    (re.compile(
+        r"\b(read|summari[sz]e|show)\b.{0,40}\b(email|emails|inbox|gmail|outlook)\b",
+        re.I), "read_email_summary"),
+    # read_text_messages
+    (re.compile(
+        r"\b(read|summari[sz]e|show)\b.{0,40}\b(text|texts|sms|messages)\b",
+        re.I), "read_text_messages"),
     # add_calendar_reminder
     (re.compile(
         r"\b(calendar|reminder|remind me|schedule|event|appointment)\b",
@@ -62,6 +70,19 @@ INTENT_PATTERNS = [
 
 # Param extraction prompts — short and focused so the model stays on task
 PARAM_PROMPTS = {
+    "read_text_messages": (
+        'Extract filters for reading/summarizing text messages.\n'
+        'Reply with ONLY this JSON, no extra text:\n'
+        '{{"scope":"<all_unread|count|contact>","count":<number|null>,"contact":"<name or null>"}}\n\n'
+        'User input: "{message}"'
+    ),
+    "read_email_summary": (
+        'Extract filters for reading/summarizing unread emails.\n'
+        'Provider must be gmail or outlook.\n'
+        'Reply with ONLY this JSON, no extra text:\n'
+        '{{"provider":"<gmail|outlook>","count":<number>}}\n\n'
+        'User input: "{message}"'
+    ),
     "add_calendar_reminder": (
         'Extract the reminder title and time/date from the user input.\n'
         'Reply with ONLY this JSON, no extra text:\n'
@@ -81,9 +102,10 @@ PARAM_PROMPTS = {
         'User input: "{message}"'
     ),
     "send_email": (
-        'Extract the recipient and message from the user input.\n'
+        'Extract the email provider, recipient, subject, and message from the user input.\n'
+        'Provider must be gmail or outlook.\n'
         'Reply with ONLY this JSON, no extra text:\n'
-        '{{"to": "<name or email>", "subject": "<subject>", "message": "<text>"}}\n\n'
+        '{{"provider":"<gmail|outlook>", "to": "<name or email>", "subject": "<subject>", "message": "<text>"}}\n\n'
         'User input: "{message}"'
     ),
     "set_alarm": (
@@ -102,14 +124,16 @@ PARAM_PROMPTS = {
 }
 
 CAPABILITIES_TEXT = """\
-Hi! Here's what I can do:
+Hi! I'm Sepher. Here's what I can do:
 1) **set_alarm** — Set an alarm (e.g. "set alarm for 7am")
 2) **send_sms** — Send a text (e.g. "text Stefanie I love you")
 3) **play_spotify** — Play music (e.g. "play lo-fi")
-4) **send_email** — Send an email (e.g. "email John about the meeting")
+4) **send_email** — Send email with provider (e.g. "send gmail email to john@example.com about meeting")
 5) **get_notifications** — Read your notifications (e.g. "read my notifications")
 6) **add_calendar_reminder** — Add a calendar reminder (e.g. "remind me tomorrow at 9am to call mom")
 7) **add_note** — Add a new note (e.g. "note: buy milk and eggs")
+8) **read_text_messages** — Summarize unread texts (e.g. "summarize unread texts" or "read 5 texts from Sam")
+9) **read_email_summary** — Summarize unread emails (e.g. "read first 10 unread gmail emails")
 
 Just tell me what you need!\
 """
@@ -207,9 +231,9 @@ async def query_llm_chat(message: str) -> str:
     """
     prompt = (
         "### System:\n"
-        "You are PhoneBot, a personal phone assistant. "
+        "You are Sepher, AI Assistant ni Charles, a personal phone assistant. "
         "Your personality is cool, funky, and confident while staying helpful and clear. "
-        "You can set alarms, send texts, play Spotify, send emails, read notifications, add calendar reminders, and add notes. "
+        "You can set alarms, send texts, play Spotify, send emails, read notifications, add calendar reminders, add notes, summarize unread text messages, and summarize unread emails. "
         "If asked who you are or what you do, introduce yourself briefly. "
         "If asked something you cannot do, say so politely and suggest what you can do instead. "
         "Keep replies short and friendly. "
