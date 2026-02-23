@@ -76,10 +76,12 @@ async def on_message(message: discord.Message):
             data = response.json()
 
         if not data.get("ok"):
+            print(f"DEBUG task response (not ok): {data}")
             await safe_edit(processing, f"Server error: {data}")
             return
 
         action = data.get("action")
+        print(f"DEBUG task response action={action!r} payload={data}")
 
         if action == "chat":
             reply = data.get("reply", "")
