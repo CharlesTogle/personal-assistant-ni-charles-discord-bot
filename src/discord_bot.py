@@ -25,11 +25,19 @@ if not AUTHORIZED_DISCORD_IDS:
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
+DISCORD_MESSAGE_LIMIT = 2000
 
 
 @client.event
 async def on_ready():
     print(f"Bot online as {client.user}")
+
+
+async def safe_edit(target_message: discord.Message, content: str):
+    text = (content or "").strip() or "No response"
+    if len(text) > DISCORD_MESSAGE_LIMIT:
+        text = text[: DISCORD_MESSAGE_LIMIT - 20] + "\n\n[truncated]"
+    await target_message.edit(content=text)
 
 
 @client.event
@@ -68,33 +76,34 @@ async def on_message(message: discord.Message):
             data = response.json()
 
         if not data.get("ok"):
-            await processing.edit(content=f"Server error: {data}")
+            await safe_edit(processing, f"Server error: {data}")
             return
 
         action = data.get("action")
 
         if action == "chat":
-            await processing.edit(content=data.get("reply", "No response"))
+            await safe_edit(processing, data.get("reply") or "No response")
             return
 
         params = data.get("params", {})
         android = data.get("android_response", {})
         params_json = json.dumps(params, indent=2, ensure_ascii=True)
 
-        await processing.edit(
-            content=(
+        await safe_edit(
+            processing,
+            (
                 f"Completed: **{action}**\n"
                 f"```json\n{params_json}\n```\n"
                 f"Phone status: {android.get('status', 'done')}"
-            )
+            ),
         )
 
     except httpx.TimeoutException:
-        await processing.edit(content="Timed out: server or phone did not respond in time")
+        await safe_edit(processing, "Timed out: server or phone did not respond in time")
     except httpx.HTTPStatusError as exc:
-        await processing.edit(content=f"HTTP error: {exc.response.status_code} {exc.response.text}")
+        await safe_edit(processing, f"HTTP error: {exc.response.status_code} {exc.response.text}")
     except Exception as exc:
-        await processing.edit(content=f"Error: {exc}")
+        await safe_edit(processing, f"Error: {exc}")
 
 
 if __name__ == "__main__":
