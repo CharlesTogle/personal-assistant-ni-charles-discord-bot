@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import traceback
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
@@ -95,10 +96,13 @@ async def send_to_android(command: dict) -> dict:
     """Try local first (fast), fall back to ngrok."""
     for url, timeout in [(ANDROID_LOCAL_URL, 2), (ANDROID_URL, 15)]:
         try:
+            print(f"DEBUG ANDROID try url={url} timeout={timeout}s command={command}")
             async with httpx.AsyncClient(timeout=timeout) as client:
                 r = await client.post(f"{url}/command", json=command, auth=ANDROID_AUTH)
+                print(f"DEBUG ANDROID success url={url} status={r.status_code} body={r.text[:160]!r}")
                 return r.json()
-        except Exception:
+        except Exception as e:
+            print(f"DEBUG ANDROID fail url={url} error={type(e).__name__}: {e}")
             continue
     raise RuntimeError("Android app unreachable on both local and ngrok")
 
@@ -137,6 +141,8 @@ async def create_task(request: Request):
     try:
         llm_reply = await query_llm(message)
     except Exception as e:
+        print(f"DEBUG TASK llm_error type={type(e).__name__} error={e}")
+        traceback.print_exc()
         raise HTTPException(status_code=502, detail=f"LLM error: {e}")
 
     if not llm_reply:
@@ -153,6 +159,8 @@ async def create_task(request: Request):
         try:
             android_response = await send_to_android(command)
         except Exception as e:
+            print(f"DEBUG TASK android_error type={type(e).__name__} error={e}")
+            traceback.print_exc()
             raise HTTPException(status_code=502, detail=str(e))
 
         return {
