@@ -98,7 +98,8 @@ async def on_message(message: discord.Message):
             (
                 f"Completed: **{action}**\n"
                 f"```json\n{params_json}\n```\n"
-                f"Phone status: {android.get('status', 'done')}"
+                f"Phone status: {android.get('status', 'done')}\n"
+                f"Reason: {android.get('reason', android.get('message', 'n/a'))}"
             ),
         )
 
