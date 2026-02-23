@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import os
-import re
 import traceback
 from pathlib import Path
 from dotenv import load_dotenv
@@ -106,22 +105,31 @@ async def query_llm(prompt: str) -> str:
         return text
 
 
-def parse_direct_command(message: str) -> dict | None:
-    text = message.strip().lower()
-    if "alarm" not in text:
-        return None
-
-    # Examples matched:
-    # - set alarm at 11pm
-    # - set an alarm for 7:30 am
-    # - alarm 6am
-    match = re.search(r"(?:at|for)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b", text)
-    if not match:
-        return None
-
-    raw_time = re.sub(r"\s+", "", match.group(1)).upper()
-    normalized = raw_time.replace("AM", " AM").replace("PM", " PM")
-    return {"action": "set_alarm", "params": {"time": normalized}}
+def extract_action_json(text: str) -> dict | None:
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    snippet = text[start : idx + 1]
+                    try:
+                        obj = json.loads(snippet)
+                    except json.JSONDecodeError:
+                        break
+                    if isinstance(obj, dict) and "action" in obj:
+                        # Common typo from tiny models
+                        if obj.get("action") == "set_alairm":
+                            obj["action"] = "set_alarm"
+                        obj.setdefault("params", {})
+                        return obj
+                    break
+        start = text.find("{", start + 1)
+    return None
 
 
 # ── Android forwarder ─────────────────────────────────────────────────────────
@@ -177,21 +185,6 @@ async def create_task(request: Request):
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
 
-    direct_command = parse_direct_command(message)
-    if direct_command is not None:
-        try:
-            android_response = await send_to_android(direct_command)
-        except Exception as e:
-            print(f"DEBUG TASK android_error type={type(e).__name__} error={e}")
-            traceback.print_exc()
-            raise HTTPException(status_code=502, detail=str(e))
-        return {
-            "ok": True,
-            "action": direct_command["action"],
-            "params": direct_command.get("params", {}),
-            "android_response": android_response,
-        }
-
     try:
         llm_reply = await query_llm(message)
     except Exception as e:
@@ -202,31 +195,31 @@ async def create_task(request: Request):
     if not llm_reply:
         return {"ok": True, "action": "chat", "reply": "The model returned an empty response, please try again."}
 
-    # try to parse as a JSON command
+    # Try strict JSON first, then JSON extraction from noisy output.
     try:
         command = json.loads(llm_reply)
-        action  = command.get("action", "unknown")
-
-        if action == "unknown":
+    except json.JSONDecodeError:
+        command = extract_action_json(llm_reply)
+        if command is None:
             return {"ok": True, "action": "chat", "reply": llm_reply}
 
-        try:
-            android_response = await send_to_android(command)
-        except Exception as e:
-            print(f"DEBUG TASK android_error type={type(e).__name__} error={e}")
-            traceback.print_exc()
-            raise HTTPException(status_code=502, detail=str(e))
-
-        return {
-            "ok":               True,
-            "action":           action,
-            "params":           command.get("params", {}),
-            "android_response": android_response,
-        }
-
-    except json.JSONDecodeError:
-        # conversational reply, not a command
+    action = command.get("action", "unknown")
+    if action == "unknown":
         return {"ok": True, "action": "chat", "reply": llm_reply}
+
+    try:
+        android_response = await send_to_android(command)
+    except Exception as e:
+        print(f"DEBUG TASK android_error type={type(e).__name__} error={e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return {
+        "ok": True,
+        "action": action,
+        "params": command.get("params", {}),
+        "android_response": android_response,
+    }
 
 
 @app.post("/command")
