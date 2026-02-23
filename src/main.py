@@ -116,6 +116,47 @@ def is_greeting(message: str) -> bool:
     return bool(pattern.match(message))
 
 
+# ── LLM payload parsing ───────────────────────────────────────────────────────
+def extract_llm_text(payload: object) -> str:
+    """
+    Handle common response shapes:
+    - llama.cpp /completion: {"content": "..."}
+    - local proxy:           {"response": "..."} or {"response":{"response":"..."}}
+    - OpenAI-ish:            {"choices":[{"text":"..."}]} / {"choices":[{"message":{"content":"..."}}]}
+    """
+    if isinstance(payload, str):
+        return payload.strip()
+
+    if not isinstance(payload, dict):
+        return ""
+
+    content = payload.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+
+    response = payload.get("response")
+    if isinstance(response, str) and response.strip():
+        return response.strip()
+    if isinstance(response, dict):
+        inner = response.get("response") or response.get("content")
+        if isinstance(inner, str) and inner.strip():
+            return inner.strip()
+
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0] if isinstance(choices[0], dict) else {}
+        text = first.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+        message = first.get("message")
+        if isinstance(message, dict):
+            msg_content = message.get("content")
+            if isinstance(msg_content, str) and msg_content.strip():
+                return msg_content.strip()
+
+    return ""
+
+
 # ── LLM param extraction ──────────────────────────────────────────────────────
 async def extract_params(action: str, message: str) -> dict:
     """
@@ -145,14 +186,13 @@ async def extract_params(action: str, message: str) -> dict:
             })
             response.raise_for_status()
             payload = response.json()
-
-            raw = (
-                payload.get("content")
-                or payload.get("response")
-                or ""
-            ).strip()
+            raw = extract_llm_text(payload)
 
             print(f"DEBUG params | action={action} | raw={raw!r}")
+            if not raw:
+                keys = list(payload.keys()) if isinstance(payload, dict) else type(payload).__name__
+                print(f"DEBUG params | empty raw | payload_keys={keys} | payload={str(payload)[:500]!r}")
+                return {}
 
             # strip markdown fences just in case
             clean = raw.strip("`").strip()
