@@ -188,7 +188,7 @@ async def extract_params(action: str, message: str) -> dict:
     prompt = f"### User:\n{prompt_template.format(message=message)}\n\n### Assistant:\n"
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(LLAMA_URL, json={
                 "prompt":         prompt,
                 "n_predict":      60,
@@ -217,12 +217,65 @@ async def extract_params(action: str, message: str) -> dict:
 
             return json.loads(clean)
 
+    except httpx.TimeoutException:
+        print(f"DEBUG params | timeout for action={action}, using fallback")
+        return fallback_extract_params(action=action, message=message)
     except json.JSONDecodeError:
-        print(f"DEBUG params | JSON parse failed, returning empty params")
-        return {}
+        print(f"DEBUG params | JSON parse failed, using fallback")
+        return fallback_extract_params(action=action, message=message)
     except Exception as e:
-        print(f"DEBUG params | error: {e}, returning empty params")
+        print(f"DEBUG params | error: {e}, using fallback")
+        return fallback_extract_params(action=action, message=message)
+
+
+def fallback_extract_params(action: str, message: str) -> dict:
+    """
+    Deterministic parser fallback so critical flows do not block on LLM.
+    """
+    if action != "send_sms":
         return {}
+
+    text = message.strip()
+    lowered = text.lower()
+
+    # Remove leading command phrases.
+    prefixes = [
+        "send a message to ",
+        "send message to ",
+        "send sms to ",
+        "text ",
+        "message ",
+        "tell ",
+    ]
+    working = text
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            working = text[len(prefix):].strip()
+            break
+
+    # Split recipient and message using common separators.
+    separators = [" saying ", " that ", " to say ", " msg ", " message "]
+    recipient = working
+    sms_message = ""
+    lower_working = working.lower()
+    for separator in separators:
+        index = lower_working.find(separator)
+        if index != -1:
+            recipient = working[:index].strip()
+            sms_message = working[index + len(separator):].strip()
+            break
+
+    # Final fallback: first token as recipient, rest as message.
+    if not sms_message:
+        parts = working.split(maxsplit=1)
+        if len(parts) == 2:
+            recipient = parts[0].strip()
+            sms_message = parts[1].strip()
+
+    return {
+        "to": recipient,
+        "message": sms_message,
+    }
 
 
 async def query_llm_chat(message: str) -> str:
