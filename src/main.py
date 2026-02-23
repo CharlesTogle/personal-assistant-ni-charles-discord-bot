@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import traceback
 from pathlib import Path
 from dotenv import load_dotenv
@@ -26,6 +27,7 @@ ANDROID_AUTH      = (
     os.environ.get("ANDROID_AUTH_USER", "assistant"),
     os.environ.get("ANDROID_AUTH_PASS", "password"),
 )
+SIMULATE_ANDROID = os.environ.get("SIMULATE_ANDROID", "true").lower() in {"1", "true", "yes", "on"}
 
 SYSTEM_PROMPT = """You are PhoneBot. You only do two things:
 1. If the user says hi or asks what you can do, reply with exactly this:
@@ -104,8 +106,32 @@ async def query_llm(prompt: str) -> str:
         return text
 
 
+def parse_direct_command(message: str) -> dict | None:
+    text = message.strip().lower()
+    if "alarm" not in text:
+        return None
+
+    # Examples matched:
+    # - set alarm at 11pm
+    # - set an alarm for 7:30 am
+    # - alarm 6am
+    match = re.search(r"(?:at|for)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b", text)
+    if not match:
+        return None
+
+    raw_time = re.sub(r"\s+", "", match.group(1)).upper()
+    normalized = raw_time.replace("AM", " AM").replace("PM", " PM")
+    return {"action": "set_alarm", "params": {"time": normalized}}
+
+
 # ── Android forwarder ─────────────────────────────────────────────────────────
 async def send_to_android(command: dict) -> dict:
+    if SIMULATE_ANDROID:
+        return {
+            "status": "simulated_success",
+            "message": f"Simulated: executed {command.get('action')}",
+        }
+
     """Try local first (fast), fall back to ngrok."""
     for url, timeout in [(ANDROID_LOCAL_URL, 2), (ANDROID_URL, 15)]:
         try:
@@ -150,6 +176,21 @@ async def create_task(request: Request):
     message = data.get("message", "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
+
+    direct_command = parse_direct_command(message)
+    if direct_command is not None:
+        try:
+            android_response = await send_to_android(direct_command)
+        except Exception as e:
+            print(f"DEBUG TASK android_error type={type(e).__name__} error={e}")
+            traceback.print_exc()
+            raise HTTPException(status_code=502, detail=str(e))
+        return {
+            "ok": True,
+            "action": direct_command["action"],
+            "params": direct_command.get("params", {}),
+            "android_response": android_response,
+        }
 
     try:
         llm_reply = await query_llm(message)
