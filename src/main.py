@@ -30,6 +30,14 @@ ANDROID_AUTH      = (
 # ── Intent patterns ──────────────────────────────────────────────────────────
 # Ordered by specificity — more specific patterns first
 INTENT_PATTERNS = [
+    # add_calendar_reminder
+    (re.compile(
+        r"\b(calendar|reminder|remind me|schedule|event|appointment)\b",
+        re.I), "add_calendar_reminder"),
+    # add_note
+    (re.compile(
+        r"\b(note|notes|notepad|memo|jot|write this down)\b",
+        re.I), "add_note"),
     # send_sms
     (re.compile(
         r"\b(text|sms|tell|say to|msg|message)\b.{0,40}\b\w+\b",
@@ -54,6 +62,18 @@ INTENT_PATTERNS = [
 
 # Param extraction prompts — short and focused so the model stays on task
 PARAM_PROMPTS = {
+    "add_calendar_reminder": (
+        'Extract the reminder title and time/date from the user input.\n'
+        'Reply with ONLY this JSON, no extra text:\n'
+        '{{"title": "<reminder title>", "time": "<time or date/time>"}}\n\n'
+        'User input: "{message}"'
+    ),
+    "add_note": (
+        'Extract the note content from the user input.\n'
+        'Reply with ONLY this JSON, no extra text:\n'
+        '{{"content": "<note text>"}}\n\n'
+        'User input: "{message}"'
+    ),
     "send_sms": (
         'Extract the recipient name and message from the user input.\n'
         'Reply with ONLY this JSON, no extra text:\n'
@@ -88,6 +108,8 @@ Hi! Here's what I can do:
 3) **play_spotify** — Play music (e.g. "play lo-fi")
 4) **send_email** — Send an email (e.g. "email John about the meeting")
 5) **get_notifications** — Read your notifications (e.g. "read my notifications")
+6) **add_calendar_reminder** — Add a calendar reminder (e.g. "remind me tomorrow at 9am to call mom")
+7) **add_note** — Add a new note (e.g. "note: buy milk and eggs")
 
 Just tell me what you need!\
 """
@@ -187,7 +209,7 @@ async def query_llm_chat(message: str) -> str:
         "### System:\n"
         "You are PhoneBot, a personal phone assistant. "
         "Your personality is cool, funky, and confident while staying helpful and clear. "
-        "You can set alarms, send texts, play Spotify, send emails, and read notifications. "
+        "You can set alarms, send texts, play Spotify, send emails, read notifications, add calendar reminders, and add notes. "
         "If asked who you are or what you do, introduce yourself briefly. "
         "If asked something you cannot do, say so politely and suggest what you can do instead. "
         "Keep replies short and friendly. "
