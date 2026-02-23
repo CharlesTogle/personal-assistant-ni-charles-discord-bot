@@ -1,0 +1,88 @@
+import json
+import os
+from pathlib import Path
+
+import discord
+import httpx
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8000").rstrip("/")
+AUTHORIZED_DISCORD_IDS = {
+    discord_id.strip()
+    for discord_id in os.environ.get("AUTHORIZED_DISCORD_IDS", "").split(",")
+    if discord_id.strip()
+}
+
+if not TOKEN:
+    raise RuntimeError("DISCORD_BOT_TOKEN is missing in .env")
+
+if not AUTHORIZED_DISCORD_IDS:
+    raise RuntimeError("AUTHORIZED_DISCORD_IDS is missing in .env")
+
+intents = discord.Intents.default()
+intents.message_content = True
+client = discord.Client(intents=intents)
+
+
+@client.event
+async def on_ready():
+    print(f"Bot online as {client.user}")
+
+
+@client.event
+async def on_message(message: discord.Message):
+    if message.author == client.user:
+        return
+
+    if str(message.author.id) not in AUTHORIZED_DISCORD_IDS:
+        return
+
+    processing = await message.reply("Processing...")
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as http:
+            response = await http.post(
+                f"{SERVER_URL}/task",
+                json={
+                    "discord_id": str(message.author.id),
+                    "message": message.content,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        if not data.get("ok"):
+            await processing.edit(content=f"Server error: {data}")
+            return
+
+        action = data.get("action")
+
+        if action == "chat":
+            await processing.edit(content=data.get("reply", "No response"))
+            return
+
+        params = data.get("params", {})
+        android = data.get("android_response", {})
+        params_json = json.dumps(params, indent=2, ensure_ascii=True)
+
+        await processing.edit(
+            content=(
+                f"Completed: **{action}**\n"
+                f"```json\n{params_json}\n```\n"
+                f"Phone status: {android.get('status', 'done')}"
+            )
+        )
+
+    except httpx.TimeoutException:
+        await processing.edit(content="Timed out: server or phone did not respond in time")
+    except httpx.HTTPStatusError as exc:
+        await processing.edit(content=f"HTTP error: {exc.response.status_code} {exc.response.text}")
+    except Exception as exc:
+        await processing.edit(content=f"Error: {exc}")
+
+
+if __name__ == "__main__":
+    client.run(TOKEN)
