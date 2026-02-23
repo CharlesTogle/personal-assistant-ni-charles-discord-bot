@@ -30,9 +30,9 @@ ANDROID_AUTH      = (
 # ── Intent patterns ──────────────────────────────────────────────────────────
 # Ordered by specificity — more specific patterns first
 INTENT_PATTERNS = [
-    # send_sms — must come before send_email to avoid "send" ambiguity
+    # send_sms
     (re.compile(
-        r"\b(text|sms|message|tell|say to|msg|whatsapp|chat)\b",
+        r"\b(text|sms|tell|say to|msg|message)\b.{0,40}\b\w+\b",
         re.I), "send_sms"),
     # send_email
     (re.compile(
@@ -40,19 +40,19 @@ INTENT_PATTERNS = [
         re.I), "send_email"),
     # set_alarm
     (re.compile(
-        r"\b(alarm|wake me|wake up|remind me|set a reminder|reminder)\b",
+        r"\b(alarm|wake|remind|reminder)\b",
         re.I), "set_alarm"),
     # play_spotify
     (re.compile(
-        r"\b(play|music|song|spotify|listen|queue|shuffle|artist|track)\b",
+        r"\b(play|music|song|spotify|listen|queue|shuffle|track)\b",
         re.I), "play_spotify"),
     # get_notifications
     (re.compile(
-        r"\b(notification|notif|alerts?|updates?|what.s new|anything new|missed|inbox)\b",
+        r"\b(notification|notif|alert|update|miss|inbox|read|check|catch up|show me|what did|anything new|what.s new)\b",
         re.I), "get_notifications"),
 ]
 
-# Param extraction prompts — focused and short so TinyLlama/Qwen stays on task
+# Param extraction prompts — short and focused so the model stays on task
 PARAM_PROMPTS = {
     "send_sms": (
         'Extract the recipient name and message from the user input.\n'
@@ -87,7 +87,7 @@ Hi! Here's what I can do:
 2) **send_sms** — Send a text (e.g. "text Stefanie I love you")
 3) **play_spotify** — Play music (e.g. "play lo-fi")
 4) **send_email** — Send an email (e.g. "email John about the meeting")
-5) **get_notifications** — Read your notifications (e.g. "what did I miss?")
+5) **get_notifications** — Read your notifications (e.g. "read my notifications")
 
 Just tell me what you need!\
 """
@@ -116,57 +116,16 @@ def is_greeting(message: str) -> bool:
     return bool(pattern.match(message))
 
 
-# ── LLM payload parsing ───────────────────────────────────────────────────────
-def extract_llm_text(payload: object) -> str:
-    """
-    Handle common response shapes:
-    - llama.cpp /completion: {"content": "..."}
-    - local proxy:           {"response": "..."} or {"response":{"response":"..."}}
-    - OpenAI-ish:            {"choices":[{"text":"..."}]} / {"choices":[{"message":{"content":"..."}}]}
-    """
-    if isinstance(payload, str):
-        return payload.strip()
-
-    if not isinstance(payload, dict):
-        return ""
-
-    content = payload.get("content")
-    if isinstance(content, str) and content.strip():
-        return content.strip()
-
-    response = payload.get("response")
-    if isinstance(response, str) and response.strip():
-        return response.strip()
-    if isinstance(response, dict):
-        inner = response.get("response") or response.get("content")
-        if isinstance(inner, str) and inner.strip():
-            return inner.strip()
-
-    choices = payload.get("choices")
-    if isinstance(choices, list) and choices:
-        first = choices[0] if isinstance(choices[0], dict) else {}
-        text = first.get("text")
-        if isinstance(text, str) and text.strip():
-            return text.strip()
-        message = first.get("message")
-        if isinstance(message, dict):
-            msg_content = message.get("content")
-            if isinstance(msg_content, str) and msg_content.strip():
-                return msg_content.strip()
-
-    return ""
-
-
 # ── LLM param extraction ──────────────────────────────────────────────────────
 async def extract_params(action: str, message: str) -> dict:
     """
     Use the LLM only to extract params from the message,
     given that we already know the action via regex.
-    Much more reliable than asking the model to do both tasks.
+    Much more reliable than asking the model to figure out both.
     """
     prompt_template = PARAM_PROMPTS.get(action)
 
-    # no params needed
+    # no params needed for this action
     if prompt_template is None:
         return {}
 
@@ -186,13 +145,14 @@ async def extract_params(action: str, message: str) -> dict:
             })
             response.raise_for_status()
             payload = response.json()
-            raw = extract_llm_text(payload)
+
+            raw = (
+                payload.get("content")
+                or payload.get("response")
+                or ""
+            ).strip()
 
             print(f"DEBUG params | action={action} | raw={raw!r}")
-            if not raw:
-                keys = list(payload.keys()) if isinstance(payload, dict) else type(payload).__name__
-                print(f"DEBUG params | empty raw | payload_keys={keys} | payload={str(payload)[:500]!r}")
-                return {}
 
             # strip markdown fences just in case
             clean = raw.strip("`").strip()
@@ -209,9 +169,41 @@ async def extract_params(action: str, message: str) -> dict:
         return {}
 
 
+async def query_llm_chat(message: str) -> str:
+    """
+    For messages that don't match any intent pattern,
+    let the LLM respond conversationally.
+    """
+    prompt = (
+        "### System:\n"
+        "You are PhoneBot, a personal phone assistant. "
+        "You can set alarms, send texts, play Spotify, send emails, and read notifications. "
+        "If asked who you are or what you do, introduce yourself briefly. "
+        "If asked something you cannot do, say so politely and suggest what you can do instead. "
+        "Keep replies short and friendly.\n\n"
+        f"### User:\n{message}\n\n"
+        "### Assistant:\n"
+    )
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(LLAMA_URL, json={
+            "prompt":         prompt,
+            "n_predict":      120,
+            "temperature":    0.7,
+            "top_k":          40,
+            "top_p":          0.9,
+            "repeat_penalty": 1.1,
+            "cache_prompt":   True,
+            "stop":           ["### User:", "\n###"],
+        })
+        response.raise_for_status()
+        payload = response.json()
+        return (payload.get("content") or payload.get("response") or "").strip()
+
+
 # ── Android forwarder ─────────────────────────────────────────────────────────
 async def send_to_android(command: dict) -> dict:
-    """Try local IP first, then ngrok, then simulate if both fail."""
+    """Try local IP first (2s timeout), fall back to ngrok."""
     try:
         async with httpx.AsyncClient(timeout=2) as client:
             r = await client.post(
@@ -224,24 +216,14 @@ async def send_to_android(command: dict) -> dict:
     except Exception as e:
         print(f"DEBUG android | local failed ({e}), trying ngrok...")
 
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(
-                f"{ANDROID_URL}/command",
-                json=command,
-                auth=ANDROID_AUTH,
-            )
-            print(f"DEBUG android | via=ngrok | status={r.status_code}")
-            return r.json()
-    except Exception as e:
-        print(f"DEBUG android | ngrok failed ({e}), using simulated response")
-        return {
-            "status": "simulated_success",
-            "simulated": True,
-            "action": command.get("action"),
-            "params": command.get("params", {}),
-            "message": "Android unreachable (local + ngrok). Simulated action completed.",
-        }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"{ANDROID_URL}/command",
+            json=command,
+            auth=ANDROID_AUTH,
+        )
+        print(f"DEBUG android | via=ngrok | status={r.status_code}")
+        return r.json()
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -291,18 +273,12 @@ async def create_task(request: Request):
     action = match_intent(message)
 
     if action is None:
-        return {
-            "ok":     True,
-            "action": "chat",
-            "reply":  (
-                "I'm not sure what you mean. Try:\n"
-                "• \"text Stefanie I love you\"\n"
-                "• \"set alarm for 7am\"\n"
-                "• \"play lo-fi\"\n"
-                "• \"email John about the meeting\"\n"
-                "• \"what did I miss?\""
-            ),
-        }
+        # Fall through to LLM for conversational response
+        try:
+            llm_reply = await query_llm_chat(message)
+        except Exception:
+            llm_reply = "Sorry, I didn't understand that. Try saying 'help' to see what I can do."
+        return {"ok": True, "action": "chat", "reply": llm_reply}
 
     print(f"DEBUG task | matched action={action}")
 
@@ -330,7 +306,7 @@ async def create_task(request: Request):
 async def raw_command(request: Request):
     """
     Bypass LLM entirely — send a raw command directly to Android.
-    Useful for testing individual actions without going through intent parsing.
+    Useful for testing individual actions without intent parsing.
 
     Body: { "discord_id": "...", "action": "set_alarm", "params": { "time": "7:00 AM" } }
     """
