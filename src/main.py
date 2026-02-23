@@ -48,7 +48,7 @@ Examples:
 
 Do not explain. Do not write code. Do not write examples outside of JSON."""
 
-N_PREDICT = 80
+N_PREDICT = 128
 STOP_WORDS = ["### User:", "\n###"]
 
 
