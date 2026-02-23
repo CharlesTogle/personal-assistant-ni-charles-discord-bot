@@ -261,14 +261,48 @@ async def query_llm_chat(message: str) -> str:
 
 # ── Android forwarder ─────────────────────────────────────────────────────────
 async def send_to_android(command: dict) -> dict:
-    """Simulated execution mode for action testing."""
-    return {
-        "status": "simulated_success",
-        "simulated": True,
-        "action": command.get("action"),
-        "params": command.get("params", {}),
-        "message": "Simulated action completed successfully.",
+    """Forward command to Sepher Android app via LAN first, then fallback URL."""
+    action_aliases = {
+        "add_note": "create_note",
+        "add_calendar_reminder": "add_calendar",
+        "read_text_messages": "summarize_sms",
+        "read_email_summary": "summarize_email",
     }
+
+    action = command.get("action")
+    normalized_action = action_aliases.get(action, action)
+    payload = {
+        "action": normalized_action,
+        "params": command.get("params", {}),
+    }
+
+    def build_command_url(base_url: str) -> str:
+        return f"{base_url.rstrip('/')}/command"
+
+    urls = []
+    if ANDROID_LOCAL_URL.strip():
+        urls.append(("local", build_command_url(ANDROID_LOCAL_URL)))
+    if ANDROID_URL.strip() and ANDROID_URL.strip() != ANDROID_LOCAL_URL.strip():
+        urls.append(("remote", build_command_url(ANDROID_URL)))
+
+    last_error = None
+    async with httpx.AsyncClient(timeout=20) as client:
+        for mode, url in urls:
+            try:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    auth=ANDROID_AUTH,
+                )
+                response.raise_for_status()
+                data = response.json()
+                data["_forwarded_via"] = mode
+                data["_forwarded_url"] = url
+                return data
+            except Exception as e:
+                last_error = f"{mode}:{url} -> {e}"
+
+    raise RuntimeError(last_error or "No Android URL configured")
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
