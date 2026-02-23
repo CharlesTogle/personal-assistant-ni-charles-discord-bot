@@ -116,6 +116,15 @@ def is_greeting(message: str) -> bool:
     return bool(pattern.match(message))
 
 
+def strip_emojis(text: str) -> str:
+    # Remove common emoji/pictograph Unicode blocks.
+    return re.sub(
+        r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF\U0001F1E6-\U0001F1FF\u2600-\u26FF]+",
+        "",
+        text,
+    ).strip()
+
+
 # ── LLM param extraction ──────────────────────────────────────────────────────
 async def extract_params(action: str, message: str) -> dict:
     """
@@ -200,7 +209,8 @@ async def query_llm_chat(message: str) -> str:
         })
         response.raise_for_status()
         payload = response.json()
-        return (payload.get("content") or payload.get("response") or "").strip()
+        raw = (payload.get("content") or payload.get("response") or "").strip()
+        return strip_emojis(raw)
 
 
 # ── Android forwarder ─────────────────────────────────────────────────────────
